@@ -16,11 +16,29 @@ def travis_builds_for_project(repo, wait_in_s)
       sleep wait_in_s
     end
     repository = Travis::Repository.find(repo)
-    return repository.last_build_number.to_i
+    last_build = repository.last_build
+    if last_build.nil?
+      return 0, 'plain'
+    end
+    log_type = 'plain'
+    puts "Investigating build #{last_build.id} with number #{last_build.number} at #{repo}"
+    last_build.jobs.each { |job|
+      unless job.nil?
+        next if (job.log.nil? || job.log.body.nil?)
+        log = job.log.body
+        maven_test_regex = /Running (?<test_name>([A-Za-z]{1}[A-Za-z\d_]*\.)+[A-Za-z][A-Za-z\d_]*)(.*?)Tests run: (?<total_tests>\d*), Failures: (?<failed_tests>\d*), Errors: (?<error_tests>\d*), Skipped: (?<skipped_tests>\d*), Time elapsed: (?<test_duration>[+-]?([0-9]*[.])?[0-9]+)/m
+        if log.scan(maven_test_regex).size >= 1
+          log_type = 'maven'
+          puts "Found maven logs at #{repo}"
+          break
+        end
+      end
+    }
+    return last_build.number, log_type
   rescue Exception => e
     STDERR.puts "Exception at #{repo}"
     STDERR.puts e.message
-    if (defined? e.io) && e.io.status[0] == "429"
+    if e.message.start_with?("429")
       STDERR.puts "Encountered API restriction: next call, sleeping for #{wait_in_s*2}"
       return travis_builds_for_project repo, wait_in_s*2
     end
@@ -28,7 +46,7 @@ def travis_builds_for_project(repo, wait_in_s)
       STDERR.puts "Empty exception, sleeping for #{wait_in_s*2}"
       return travis_builds_for_project repo, wait_in_s*2
     end
-    return 0
+    return 0, 'plain'
   end
 end
 
@@ -38,7 +56,9 @@ def analyze_projects_on_travis
   File.open("#{@input_csv}-annotated.csv", 'w') { |file|
     CSV.foreach(@input_csv, :headers => true) do |row|
       curRow = row
-      curRow << travis_builds_for_project("#{row[0]}/#{row[1]}", 1).to_s
+      builds, log_type = travis_builds_for_project("#{row[0]}/#{row[1]}", 1)
+      curRow << builds.to_s
+      curRow << log_type
       file.write(curRow.to_csv)
       i += 1
       file.flush if i%50 == 0

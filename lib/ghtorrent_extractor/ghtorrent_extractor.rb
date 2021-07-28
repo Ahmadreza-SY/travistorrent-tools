@@ -220,12 +220,21 @@ usage:
       Trollop::die "Cannot find user #{owner}"
     end
 
-    repo_entry = db.from(:projects, :users).\
-                  where(:users__id => :projects__owner_id).\
-                  where(:users__login => owner).\
-                  where(:projects__name => repo).\
-                  select(:projects__id, :projects__language).\
-                  first
+    q = <<-QUERY
+      select p.id, p.language
+      from users u, projects p
+      where u.id = p.owner_id
+      and u.login = ?
+      and p.name = ?
+      limit 1
+      QUERY
+    repo_entry = db.fetch(q, owner, repo).first
+    # repo_entry = db.from(:projects, :users).\
+    #               where(:users__id => :projects__owner_id).\
+    #               where(:users__login => owner).\
+    #               where(:projects__name => repo).\
+    #               select(:projects__id, :projects__language).\
+    #               first
 
     if repo_entry.nil?
       Trollop::die "Cannot find repository #{owner}/#{repo}"
@@ -275,7 +284,7 @@ usage:
 
     log "After filtering empty build dates: #{builds.size} builds"
 
-    log "\nCalculating GHTorrent PR ids"
+    # log "\nCalculating GHTorrent PR ids"
     self.builds = builds.reduce([]) do |acc, build|
       unless is_pr?(build)
         acc << build
@@ -297,7 +306,7 @@ usage:
         unless r.nil?
           build[:pull_req_id] = r[:id]
           build[:pull_req_created_at] = r[:created_at]
-          log "GHT PR #{r[:id]} (#{r[:created_at]}) triggered build #{build[:pull_req]}", 1
+          # log "GHT PR #{r[:id]} (#{r[:created_at]}) triggered build #{build[:pull_req]}", 1
           acc << build
         else
           # Not yet processed by GHTorrent, don't process further
@@ -322,41 +331,41 @@ usage:
     # Get commits that close issues/pull requests
     # Index them by issue/pullreq id, as a sha might close multiple issues
     # see: https://help.github.com/articles/closing-issues-via-commit-messages
-    q = <<-QUERY
-    select c.sha
-    from commits c, project_commits pc
-    where pc.project_id = ?
-    and pc.commit_id = c.id
-    QUERY
+    # q = <<-QUERY
+    # select c.sha
+    # from commits c, project_commits pc
+    # where pc.project_id = ?
+    # and pc.commit_id = c.id
+    # QUERY
 
-    fixre = /(?:fixe[sd]?|close[sd]?|resolve[sd]?)(?:[^\/]*?|and)#([0-9]+)/mi
+    # fixre = /(?:fixe[sd]?|close[sd]?|resolve[sd]?)(?:[^\/]*?|and)#([0-9]+)/mi
 
-    log 'Calculating PRs closed by commits'
-    commits_in_prs = db.fetch(q, repo_entry[:id]).all
-    self.closed_by_commit =
-        Parallel.map(commits_in_prs, :in_threads => THREADS) do |x|
-          sha = x[:sha]
-          result = {}
-          mongo['commits'].find({:sha => sha},
-                                {:fields => {'commit.message' => 1, '_id' => 0}}).map do |x|
-            comment = x['commit']['message']
+    # log 'Calculating PRs closed by commits'
+    # commits_in_prs = db.fetch(q, repo_entry[:id]).all
+    # self.closed_by_commit =
+    #     Parallel.map(commits_in_prs, :in_threads => THREADS) do |x|
+    #       sha = x[:sha]
+    #       result = {}
+    #       mongo['commits'].find({:sha => sha},
+    #                             {:fields => {'commit.message' => 1, '_id' => 0}}).map do |x|
+    #         comment = x['commit']['message']
 
-            comment.match(fixre) do |m|
-              (1..(m.size - 1)).map do |y|
-                result[m[y].to_i] = sha
-              end
-            end
-          end
-          result
-        end.select { |x| !x.empty? }.reduce({}) { |acc, x| acc.merge(x) }
-    log "#{closed_by_commit.size} PRs closed by commits"
+    #         comment.match(fixre) do |m|
+    #           (1..(m.size - 1)).map do |y|
+    #             result[m[y].to_i] = sha
+    #           end
+    #         end
+    #       end
+    #       result
+    #     end.select { |x| !x.empty? }.reduce({}) { |acc, x| acc.merge(x) }
+    # log "#{closed_by_commit.size} PRs closed by commits"
 
-    log 'Calculating PR close reasons'
-    self.close_reason = builds.select { |b| not b[:pull_req].nil? }.reduce({}) do |acc, build|
-      acc[build[:pull_req]] = merged_with(owner, repo, build)
-      acc
-    end
-    log "Close reasons: #{close_reason.group_by { |_, v| v }.reduce({}) { |acc, x| acc.merge({x[0] => x[1].size}) }}"
+    # log 'Calculating PR close reasons'
+    # self.close_reason = builds.select { |b| not b[:pull_req].nil? }.reduce({}) do |acc, build|
+    #   acc[build[:pull_req]] = merged_with(owner, repo, build)
+    #   acc
+    # end
+    # log "Close reasons: #{close_reason.group_by { |_, v| v }.reduce({}) { |acc, x| acc.merge({x[0] => x[1].size}) }}"
 
     self.builds = builds.map { |x| x[:tr_build_commit] = x[:commit]; x }
 
@@ -372,7 +381,7 @@ usage:
         unless c.empty?
           shas = c['commit']['message'].match(/Merge (.*) into (.*)/i).captures
           if shas.size == 2
-            log "Replacing Travis commit #{build[:commit]} with actual #{shas[0]}", 2
+            # log "Replacing Travis commit #{build[:commit]} with actual #{shas[0]}", 2
 
             build[:commit] = shas[0]
             build[:tr_virtual_merged_into] = shas[1]
@@ -433,7 +442,7 @@ usage:
 
       end
 
-      log "#{prev_commits.size} built commits (#{commit_resolution_status}) for build #{build[:build_id]}", 2
+      # log "#{prev_commits.size} built commits (#{commit_resolution_status}) for build #{build[:build_id]}", 2
 
       {
           :build_id => build[:build_id],
@@ -464,93 +473,93 @@ usage:
     # For builds that are triggered from PRs, we need to find the push
     # events in the source repositories. All the remaining builds are
     # from pushes to local repository branches
-    forks = builds.select { |b| not b[:pull_req].nil? }.map do |b|
-      # Resolve PR object
-      pr = mongo['pull_requests'].find({'owner' => owner,
-                                        'repo' => repo,
-                                        'number' => b[:pull_req]}).limit(1).first
-      next if pr.nil?
-      next if pr['head'].nil?
-      next if pr['head']['repo'].nil?
-      next if pr['head']['repo']['login'].nil?
+    # forks = builds.select { |b| not b[:pull_req].nil? }.map do |b|
+    #   # Resolve PR object
+    #   pr = mongo['pull_requests'].find({'owner' => owner,
+    #                                     'repo' => repo,
+    #                                     'number' => b[:pull_req]}).limit(1).first
+    #   next if pr.nil?
+    #   next if pr['head'].nil?
+    #   next if pr['head']['repo'].nil?
+    #   next if pr['head']['repo']['login'].nil?
 
-      head_owner = pr['head']['user']['login']
-      head_repo = pr['head']['repo']['name']
-      {:owner => head_owner, :repo => head_repo}
-    end.select { |x| !x.nil? }
+    #   head_owner = pr['head']['user']['login']
+    #   head_repo = pr['head']['repo']['name']
+    #   {:owner => head_owner, :repo => head_repo}
+    # end.select { |x| !x.nil? }
 
-    all_repos = (forks << {:owner => owner, :repo => repo}).uniq
-    log 'Finding push events for all repositories that contributed pull requests'
-    log "#{all_repos.size} repos to retrieve push events for"
+    # all_repos = (forks << {:owner => owner, :repo => repo}).uniq
+    # log 'Finding push events for all repositories that contributed pull requests'
+    # log "#{all_repos.size} repos to retrieve push events for"
 
-    commit_push_info =
-        all_repos.map do |repo|
-          log "Retrieving push events for #{repo[:owner]}/#{repo[:repo]}"
-          repo_commits = []
-          push_events_processed = 0
-          mongo['events'].find({'repo.name' => "#{repo[:owner]}/#{repo[:repo]}", 'type' => 'PushEvent'},
-                               :no_cursor_timeout => false, :batch_size => 10).each do |push|
-            # Produce a list of commit object information items
-            push['payload']['commits'].each do |commit|
-              repo_commits << {:sha => commit['sha'],
-                               :pushed_at => push['created_at'],
-                               :push_id => push['id']}
-              push_events_processed += 1
-            end
-            log "#{push_events_processed} push events for #{repo[:owner]}/#{repo[:repo]}\n"
-          end
-          repo_commits
-        end.\
-        flatten.\
-          # Gather all appearances of a commit in a list per commit
-            group_by { |x| x[:sha] }.\
-          # Find the first appearance of each commit
-            reduce({}) do |acc, commit_group|
-          # sort all commit appearances in descending order and get the earliest one
-          if commit_group[1].size > 1
-            log "Commit #{commit_group[0]} appears in #{commit_group[1].size} push events", 2
-          end
-          first_appearence = commit_group[1].sort { |a, b| a[:pushed_at] <=> b[:pushed_at] }.first
-          acc.merge({commit_group[0] => [first_appearence[:pushed_at], first_appearence[:push_id]]})
-        end
+    # commit_push_info =
+    #     all_repos.map do |repo|
+    #       log "Retrieving push events for #{repo[:owner]}/#{repo[:repo]}"
+    #       repo_commits = []
+    #       push_events_processed = 0
+    #       mongo['events'].find({'repo.name' => "#{repo[:owner]}/#{repo[:repo]}", 'type' => 'PushEvent'},
+    #                            :no_cursor_timeout => false, :batch_size => 10).each do |push|
+    #         # Produce a list of commit object information items
+    #         push['payload']['commits'].each do |commit|
+    #           repo_commits << {:sha => commit['sha'],
+    #                            :pushed_at => push['created_at'],
+    #                            :push_id => push['id']}
+    #           push_events_processed += 1
+    #         end
+    #         log "#{push_events_processed} push events for #{repo[:owner]}/#{repo[:repo]}\n"
+    #       end
+    #       repo_commits
+    #     end.\
+    #     flatten.\
+    #       # Gather all appearances of a commit in a list per commit
+    #         group_by { |x| x[:sha] }.\
+    #       # Find the first appearance of each commit
+    #         reduce({}) do |acc, commit_group|
+    #       # sort all commit appearances in descending order and get the earliest one
+    #       if commit_group[1].size > 1
+    #         log "Commit #{commit_group[0]} appears in #{commit_group[1].size} push events", 2
+    #       end
+    #       first_appearence = commit_group[1].sort { |a, b| a[:pushed_at] <=> b[:pushed_at] }.first
+    #       acc.merge({commit_group[0] => [first_appearence[:pushed_at], first_appearence[:push_id]]})
+    #     end
 
-    # join build info with commit push info
-    log 'Matching push events to build commits'
-    builds.map do |build|
-      push_info = commit_push_info[build[:commit]]
+    # # join build info with commit push info
+    # log 'Matching push events to build commits'
+    # builds.map do |build|
+    #   push_info = commit_push_info[build[:commit]]
 
-      unless push_info.nil?
-        log "Push event at #{commit_push_info[build[:commit]][0]} triggered build #{build[:build_id]} (#{build[:commit]})", 2
-        build[:commit_pushed_at] = commit_push_info[build[:commit]][0]
-        build[:push_id] = commit_push_info[build[:commit]][1]
+    #   unless push_info.nil?
+    #     log "Push event at #{commit_push_info[build[:commit]][0]} triggered build #{build[:build_id]} (#{build[:commit]})", 2
+    #     build[:commit_pushed_at] = commit_push_info[build[:commit]][0]
+    #     build[:push_id] = commit_push_info[build[:commit]][1]
 
-        push_event = mongo['events'].find(({'id' => push_info[1]})).limit(1).first
-        pushed_commits = push_event['payload']['commits']
+    #     push_event = mongo['events'].find(({'id' => push_info[1]})).limit(1).first
+    #     pushed_commits = push_event['payload']['commits']
 
-        timestamps = pushed_commits.map do |x|
-          c = mongo['commits'].find({'sha' => x['sha']}).limit(1).first
+    #     timestamps = pushed_commits.map do |x|
+    #       c = mongo['commits'].find({'sha' => x['sha']}).limit(1).first
 
-          # Try to find the commit on GitHub if it is not in GHTorrent
-          c = c.nil? ? github_commit(owner, repo, x['sha']) : c
-          c['commit']['author']['date'] unless c.nil? or c.empty?
-        end.select { |x| !x.nil? }
+    #       # Try to find the commit on GitHub if it is not in GHTorrent
+    #       c = c.nil? ? github_commit(owner, repo, x['sha']) : c
+    #       c['commit']['author']['date'] unless c.nil? or c.empty?
+    #     end.select { |x| !x.nil? }
 
-        build[:first_commit_created_at] = timestamps.min
-        build[:num_commits_in_push] = pushed_commits.size
-        build[:commits_in_push] = pushed_commits.map { |c| c['sha'] }
-      else
-        log "No push event for build commit #{build[:commit]}", 2
-      end
-    end
+    #     build[:first_commit_created_at] = timestamps.min
+    #     build[:num_commits_in_push] = pushed_commits.size
+    #     build[:commits_in_push] = pushed_commits.map { |c| c['sha'] }
+    #   else
+    #     log "No push event for build commit #{build[:commit]}", 2
+    #   end
+    # end
 
-    neg_latency = builds.select do |x|
-      not x[:commit_pushed_at].nil? and
-          Time.parse(x[:commit_pushed_at]) > Time.parse(x[:started_at])
-    end
-    no_push = builds.select { |x| x[:commit_pushed_at].nil? }
-    log "#{neg_latency.size} builds have negative latency"
-    log "#{no_push.size} builds have no push info"
-    log "#{builds.size} builds to process"
+    # neg_latency = builds.select do |x|
+    #   not x[:commit_pushed_at].nil? and
+    #       Time.parse(x[:commit_pushed_at]) > Time.parse(x[:started_at])
+    # end
+    # no_push = builds.select { |x| x[:commit_pushed_at].nil? }
+    # log "#{neg_latency.size} builds have negative latency"
+    # log "#{no_push.size} builds have no push info"
+    # log "#{builds.size} builds to process"
 
     results = Parallel.map(builds, :in_threads => THREADS) do |build|
       if interrupted
@@ -559,7 +568,7 @@ usage:
 
       begin
         r = process_build(build, owner, repo, language.downcase)
-        log r
+        # log r
         r
       rescue StandardError => e
         log "Error processing build #{build[:build_id]}: #{e.message}"
@@ -567,8 +576,16 @@ usage:
       end
     end.select { |x| !x.nil? }
 
-    puts results.first.keys.map { |x| x.to_s }.join(',')
-    results.sort { |a, b| b[:build_id]<=>a[:build_id] }.each { |x| puts x.values.join(',') }
+    parent_dir = File.join('data', "#{owner}@#{repo}")
+    FileUtils::mkdir_p(parent_dir)
+    File.open(File.join(parent_dir, 'data.csv'), 'w') { |file| 
+      header = results.first.keys.map { |x| x.to_s }.join(',')
+      rows = results.sort { |a, b| b[:build_id]<=>a[:build_id] }.map { |x| x.values.join(',') }
+      file.write(rows.unshift(header).join("\n"))
+    }
+    puts "DONE!"
+    # puts results.first.keys.map { |x| x.to_s }.join(',')
+    # results.sort { |a, b| b[:build_id]<=>a[:build_id] }.each { |x| puts x.values.join(',') }
 
   end
 
@@ -617,27 +634,27 @@ usage:
 
     # Count number of src/comment lines
     sloc = src_lines(build[:commit])
-    months_back = 3
+    # months_back = 3
 
-    stats = calc_build_stats(owner, repo, build[:commits])
+    # stats = calc_build_stats(owner, repo, build[:commits])
 
-    pr_id = build[:pull_req] if is_pr?(build)
-    committers = build[:authors].map { |a| github_login(a) }.select { |x| not x.nil? }
-    main_team = main_team(owner, repo, build, months_back)
-    test_diff = test_diff_stats(build[:prev_built_commit].nil? ? build[:commit] : build[:prev_built_commit], build[:commit])
+    # pr_id = build[:pull_req] if is_pr?(build)
+    # committers = build[:authors].map { |a| github_login(a) }.select { |x| not x.nil? }
+    # main_team = main_team(owner, repo, build, months_back)
+    # test_diff = test_diff_stats(build[:prev_built_commit].nil? ? build[:commit] : build[:prev_built_commit], build[:commit])
     tr_original_commit = build[:tr_build_commit]
-    prev_build_started_at = build[:prev_build].nil? ? nil : Time.parse(build[:prev_build][:started_at])
+    # prev_build_started_at = build[:prev_build].nil? ? nil : Time.parse(build[:prev_build][:started_at])
     git_trigger_commit = is_pr?(build) ? build[:commits][0] : tr_original_commit
 
-    confounds = calculate_confounds(git_trigger_commit)
+    # confounds = calculate_confounds(git_trigger_commit)
 
-    # exclude any previously built commits
-    new_commits = build[:commits].select do |c|
-      builds.select do |b|
-        b[:build_id] < build[:build_id] and
-            b[:commits].include?(c)
-      end.empty?
-    end
+    # # exclude any previously built commits
+    # new_commits = build[:commits].select do |c|
+    #   builds.select do |b|
+    #     b[:build_id] < build[:build_id] and
+    #         b[:commits].include?(c)
+    #   end.empty?
+    # end
 
     # Some sanity checking
     raise "Bad src lines: 0, build: #{build[:build_id]}" if sloc == 0
@@ -648,57 +665,57 @@ usage:
         :tr_build_id => build[:build_id],
 
         # [doc] The timestamp the build  was started at (UTC), as reported by the Travis CI API.
-        :tr_build_started => build[:started_at],
+        # :tr_build_started => build[:started_at],
 
         # [doc] Project name on GitHub.
-        :gh_project_name => "#{owner}/#{repo}",
+        # :gh_project_name => "#{owner}/#{repo}",
 
         # [doc] Whether this build was triggered as part of a pull request on GitHub.
-        :gh_is_pr => is_pr?(build),
+        # :gh_is_pr => is_pr?(build),
 
         # [doc] If the build is a pull request, the creation timestamp for this pull request, in UTC.
-        :gh_pr_created_at => build[:pull_req_created_at],
+        # :gh_pr_created_at => build[:pull_req_created_at],
 
         # [doc] If the build is a pull request, its ID on GitHub.
-        :gh_pull_req_num => pr_id,
+        # :gh_pull_req_num => pr_id,
 
         # [doc] Dominant repository language, according to GitHub.
-        :gh_lang => lang,
+        # :gh_lang => lang,
 
         # [doc] If this commit sits on a pull request (`gh_is_pr` true), how it was closed (merge button, manual merge, ...).
-        :git_merged_with => close_reason[pr_id],
+        # :git_merged_with => close_reason[pr_id],
 
         # [doc] The branch that was built
-        :git_branch => build[:branch],
+        # :git_branch => build[:branch],
 
         # [doc] Number of commits included in the push that triggered the build. In rare cases, GHTorrent has not
         # recorded a push event for the commit that created the build in which case `num_commits_in_push` is nil.
-        :gh_num_commits_in_push => build[:num_commits_in_push],
+        # :gh_num_commits_in_push => build[:num_commits_in_push],
 
         # [doc] The commits included in the push that triggered the build. In rare cases, GHTorrent has not recorded
         # a push event for the commit that created the build in which case `gh_commits_in_push` is the empty string.
-        :gh_commits_in_push => build[:commits_in_push].nil? ? nil : build[:commits_in_push].join('#'),
+        # :gh_commits_in_push => build[:commits_in_push].nil? ? nil : build[:commits_in_push].join('#'),
 
         # [doc] When walking backwards the branch to find previously built commits, what is the reason for stopping
         # the traversal? Can be one of: `no_previous_build`: when , `build_found`: when we find a previous build,
         # or `merge_found`: when we had to stop traversal at a merge point (we cannot decide which of the parents to
         # follow).
-        :git_prev_commit_resolution_status => build[:prev_commit_resolution_status],
+        # :git_prev_commit_resolution_status => build[:prev_commit_resolution_status],
 
         # [doc] The commit that triggered the previous build on a linearized history. If
         # `git_prev_commit_resolution_status` is `merge_found`, then this is nil.
-        :git_prev_built_commit => build[:prev_built_commit],
+        # :git_prev_built_commit => build[:prev_built_commit],
 
         # [doc] The build triggered by `git_prev_built_commit`. If `git_prev_commit_resolution_status` is `merge_found`,
         # then this is nil.
-        :tr_prev_build => build[:prev_build].nil? ? nil : build[:prev_build][:build_id],
+        # :tr_prev_build => build[:prev_build].nil? ? nil : build[:prev_build][:build_id],
 
         # [doc] Timestamp of first commit in the push that triggered the build, in UTC. In rare cases, GHTorrent has not
         # recorded a push event for the commit that created the build in which case `first_commit_created_at` is nil.
-        :gh_first_commit_created_at => build[:first_commit_created_at],
+        # :gh_first_commit_created_at => build[:first_commit_created_at],
 
         # [doc] Number of developers that committed directly or merged PRs from the moment the build was triggered and 3 months back.
-        :gh_team_size => main_team.size,
+        # :gh_team_size => main_team.size,
 
         # [doc] A list of all commits that were built for this build, up to but excluding the commit of the previous
         # build, or up to and including a merge commit (in which case we cannot go further backward).
@@ -710,96 +727,96 @@ usage:
         :git_all_built_commits => build[:commits].join('#'),
 
         # [doc] Number of `git_all_built_commits`.
-        :git_num_all_built_commits => build[:commits].size,
+        # :git_num_all_built_commits => build[:commits].size,
 
         # [doc] The commit that triggered the build.
-        :git_trigger_commit => git_trigger_commit,
+        # :git_trigger_commit => git_trigger_commit,
 
         # [doc] The commit of the branch that the commit built by Travis is merged into when testing pull requests.
-        :tr_virtual_merged_into => build[:tr_virtual_merged_into],
+        # :tr_virtual_merged_into => build[:tr_virtual_merged_into],
 
         # [doc] The original commit that was build as linked to from Travis. Might be a virtual commit that is not part
         # of the original repository.
-        :tr_original_commit => tr_original_commit,
+        # :tr_original_commit => tr_original_commit,
 
         # [doc] If git_commit is linked to a PR on GitHub, the number of discussion comments on that PR.
-        :gh_num_issue_comments => num_issue_comments(build, prev_build_started_at, Time.parse(build[:started_at])),
+        # :gh_num_issue_comments => num_issue_comments(build, prev_build_started_at, Time.parse(build[:started_at])),
 
         # [doc] The number of comments on `git_all_built_commits` on GitHub.
-        :gh_num_commit_comments => num_commit_comments(owner, repo, build[:commits]),
+        # :gh_num_commit_comments => num_commit_comments(owner, repo, build[:commits]),
 
         # [doc] If gh_is_pr is true, the number of comments (code review) on this pull request on GitHub.
-        :gh_num_pr_comments => num_pr_comments(build, prev_build_started_at, Time.parse(build[:started_at])),
+        # :gh_num_pr_comments => num_pr_comments(build, prev_build_started_at, Time.parse(build[:started_at])),
 
         # [doc] The emails of the committers of the commits in all `git_all_built_commits`.
-        :git_diff_committers => '"' + build[:authors].join('#') + '"',
+        # :git_diff_committers => '"' + build[:authors].join('#') + '"',
 
         # [doc] Number of lines of production code changed in all `git_all_built_commits`.
-        :git_diff_src_churn => stats[:lines_added] + stats[:lines_deleted],
+        # :git_diff_src_churn => stats[:lines_added] + stats[:lines_deleted],
 
         # [doc] Number of lines of test code changed in all `git_all_built_commits`.
-        :git_diff_test_churn => stats[:test_lines_added] + stats[:test_lines_deleted],
+        # :git_diff_test_churn => stats[:test_lines_added] + stats[:test_lines_deleted],
 
         # [doc] Number of files added by all `git_all_built_commits`.
-        :gh_diff_files_added => stats[:files_added],
+        # :gh_diff_files_added => stats[:files_added],
 
         # [doc] Number of files deleted by all `git_all_built_commits`.
-        :gh_diff_files_deleted => stats[:files_removed],
+        # :gh_diff_files_deleted => stats[:files_removed],
 
         # [doc] Number of files modified by all `git_all_built_commits`.
-        :gh_diff_files_modified => stats[:files_modified],
+        # :gh_diff_files_modified => stats[:files_modified],
 
         # [doc] Number of test cases added by `git_all_built_commits`.
-        :gh_diff_tests_added => test_diff[:tests_added],
+        # :gh_diff_tests_added => test_diff[:tests_added],
 
         # [doc] Number of test cases deleted by `git_all_built_commits`.
-        :gh_diff_tests_deleted => test_diff[:tests_deleted],
+        # :gh_diff_tests_deleted => test_diff[:tests_deleted],
 
         # [doc] Number of src files changed by all `git_all_built_commits`.
-        :gh_diff_src_files => stats[:src_files],
+        # :gh_diff_src_files => stats[:src_files],
 
         # [doc] Number of documentation files changed by all `git_all_built_commits`.
-        :gh_diff_doc_files => stats[:doc_files],
+        # :gh_diff_doc_files => stats[:doc_files],
 
         # [doc] Number of files which are neither source code nor documentation that changed by the commits that where built.
-        :gh_diff_other_files => stats[:other_files],
+        # :gh_diff_other_files => stats[:other_files],
 
         # [doc] Number of unique commits on the files touched in the commits (`git_all_built_commits`) that triggered the
         # build from the moment the build was triggered and 3 months back. It is a metric of how active the part of
         # the project is that these commits touched.
-        :gh_num_commits_on_files_touched => commits_on_files_touched(owner, repo, build, months_back),
+        # :gh_num_commits_on_files_touched => commits_on_files_touched(owner, repo, build, months_back),
 
         # [doc] Number of executable production source lines of code, in the entire repository.
-        :gh_sloc => sloc,
+        # :gh_sloc => sloc,
 
         # [doc] Overall number of test code lines.
-        :gh_test_lines => test_lines(build[:commit]).to_f,
+        # :gh_test_lines => test_lines(build[:commit]).to_f,
 
         # [doc] Overall number of test cases.
-        :gh_test_cases => num_test_cases(build[:commit]).to_f,
+        # :gh_test_cases => num_test_cases(build[:commit]).to_f,
 
         # [doc] Overall number of assertions.
-        :gh_asserts => num_assertions(build[:commit]).to_f,
+        # :gh_asserts => num_assertions(build[:commit]).to_f,
 
         # [doc] Whether this commit was authored by a core team member. A core team member is someone who has committed
         # code at least once within the 3 months before this commit, either by directly committing it or by merging
         # commits.
-        :gh_by_core_team_member => (committers - main_team).empty?,
+        # :gh_by_core_team_member => (committers - main_team).empty?,
 
         # [doc] If the build is a pull request, the total number of words in the pull request title and description.
-        :gh_description_complexity => is_pr?(build) ? description_complexity(build) : nil,
+        # :gh_description_complexity => is_pr?(build) ? description_complexity(build) : nil,
 
         # [doc] Timestamp of the push that triggered the build (GitHub provided), in UTC.
-        :gh_pushed_at => build[:commit_pushed_at],
+        # :gh_pushed_at => build[:commit_pushed_at],
 
         # [doc] Timestamp of the push that triggered the build (Travis provided), in UTC.
         :gh_build_started_at => build[:started_at],
 
         # [doc] Age of the repository, from the latest commit to its first commit, in days
-        :gh_repo_age => confounds[:repo_age],
+        # :gh_repo_age => confounds[:repo_age],
 
         # [doc] Number of commits in the repository
-        :gh_repo_num_commits => confounds[:repo_num_commits]
+        # :gh_repo_num_commits => confounds[:repo_num_commits]
     }
 
   end
@@ -1234,6 +1251,7 @@ usage:
   end
 
   def github_login(email)
+    return nil
     q = <<-QUERY
     select u.login as login
     from users u
