@@ -285,37 +285,37 @@ usage:
     log "After filtering empty build dates: #{builds.size} builds"
 
     # log "\nCalculating GHTorrent PR ids"
-    self.builds = builds.reduce([]) do |acc, build|
-      unless is_pr?(build)
-        acc << build
-      else
-        q = <<-QUERY
-        select pr.id as id, prh.created_at as created_at
-        from pull_requests pr, users u, projects p, pull_request_history prh
-        where u.login = ?
-        and p.name = ?
-        and pr.pullreq_id = ?
-        and p.owner_id = u.id
-        and pr.base_repo_id = p.id
-        and prh.pull_request_id = pr.id
-        and prh.action = 'opened'
-        order by prh.created_at asc
-        limit 1
-        QUERY
-        r = db.fetch(q, owner, repo, build[:pull_req].to_i).first
-        unless r.nil?
-          build[:pull_req_id] = r[:id]
-          build[:pull_req_created_at] = r[:created_at]
-          # log "GHT PR #{r[:id]} (#{r[:created_at]}) triggered build #{build[:pull_req]}", 1
-          acc << build
-        else
-          # Not yet processed by GHTorrent, don't process further
-          acc
-        end
-      end
-    end
+    # self.builds = builds.reduce([]) do |acc, build|
+    #   unless is_pr?(build)
+    #     acc << build
+    #   else
+    #     q = <<-QUERY
+    #     select pr.id as id, prh.created_at as created_at
+    #     from pull_requests pr, users u, projects p, pull_request_history prh
+    #     where u.login = ?
+    #     and p.name = ?
+    #     and pr.pullreq_id = ?
+    #     and p.owner_id = u.id
+    #     and pr.base_repo_id = p.id
+    #     and prh.pull_request_id = pr.id
+    #     and prh.action = 'opened'
+    #     order by prh.created_at asc
+    #     limit 1
+    #     QUERY
+    #     r = db.fetch(q, owner, repo, build[:pull_req].to_i).first
+    #     unless r.nil?
+    #       build[:pull_req_id] = r[:id]
+    #       build[:pull_req_created_at] = r[:created_at]
+    #       # log "GHT PR #{r[:id]} (#{r[:created_at]}) triggered build #{build[:pull_req]}", 1
+    #       acc << build
+    #     else
+    #       # Not yet processed by GHTorrent, don't process further
+    #       acc
+    #     end
+    #   end
+    # end
 
-    log "After resolving GHT pullreqs: #{builds.size} builds for #{owner}/#{repo}"
+    # log "After resolving GHT pullreqs: #{builds.size} builds for #{owner}/#{repo}"
     # Update the repo
     clone(owner, repo, true)
 
