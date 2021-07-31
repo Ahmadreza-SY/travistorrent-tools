@@ -322,7 +322,7 @@ usage:
     log 'Retrieving all commits'
     walker = Rugged::Walker.new(git)
     walker.sorting(Rugged::SORT_DATE)
-    walker.push(git.head.target)
+    walker.push(git.head.target.oid)
     self.all_commits = walker.map do |commit|
       commit.oid[0..10]
     end
@@ -410,7 +410,7 @@ usage:
 
       walker = Rugged::Walker.new(git)
       walker.sorting(Rugged::SORT_TOPO)
-      walker.push(build_commit)
+      walker.push(build_commit.oid)
 
       # Get all previous commits up to a prior build or a branch point
       prev_commits = [build_commit]
